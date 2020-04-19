@@ -3,12 +3,12 @@ module Main where
 import Prelude
 
 import Effect (Effect)
-import Effect.Console (log)
 
-import Data.Covered
+import VDom (embed) as VDom
+
+import Example (app, init) as Example
 
 
 main :: Effect Unit
 main = do
-  log "🍝 Foobar"
-  log $ show $ (carry "foo" :: Covered String String)
+  VDom.embed "#app" Example.app Example.init

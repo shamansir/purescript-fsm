@@ -5,11 +5,9 @@ import Prelude
 
 import Effect (Effect)
 
-import Data.Either (Either(..))
 import Data.Maybe (Maybe(..))
 import Data.Newtype (wrap, unwrap)
 import Data.Covered (carry)
-import Data.Tuple.Nested (type (/\))
 
 import Effect.Exception (throwException, error)
 import Effect.Ref as Ref
@@ -29,17 +27,14 @@ import Web.HTML (window) as DOM
 import Web.HTML.HTMLDocument (toDocument, toParentNode) as HTMLDocument
 import Web.HTML.Window (document) as DOM
 
-import Spork.Html (Html)
-
-import Fsm (run) as Fsm
 import Ui (view, run) as Ui
 
-import Example (HtmlRenderer, Model)
+import Example (App, Model)
 
 
 embed
     :: String -- selector
-    -> HtmlRenderer
+    -> App
     -> Model
     -> Effect Unit
 embed sel renderer firstModel = do
