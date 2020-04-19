@@ -16,6 +16,7 @@ You can edit this file as you like.
   , "maybe"
   , "newtype"
   , "psci-support"
+  , "random"
   , "refs"
   , "spork"
   , "tuples"
