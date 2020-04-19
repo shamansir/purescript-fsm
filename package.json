@@ -1,0 +1,29 @@
+{
+  "name": "purescript-fsm",
+  "version": "1.0.0",
+  "description": "Finite State Machine in PureScript (The example)",
+  "main": "index.js",
+  "directories": {
+    "test": "test"
+  },
+  "dependencies": {
+  },
+  "devDependencies": {
+    "parcel": "^1.12.4"
+  },
+  "scripts": {
+    "dev": "spago build --watch & parcel index.html",
+    "test": "spago test",
+    "build": "spago build && parcel build index.html"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shamansir/purescript-fsm.git"
+  },
+  "author": "shaman.sir@gmail.com",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/shamansir/purescript-fsm/issues"
+  },
+  "homepage": "https://github.com/shamansir/purescript-fsm#readme"
+}
