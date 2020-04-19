@@ -5,7 +5,9 @@ bower_components
 node_modules
 
 # Generated files
+.cache
 .psci
 .psc-ide-port
 .purs-repl
 output
+dist
