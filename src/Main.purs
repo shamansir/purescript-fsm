@@ -5,6 +5,10 @@ import Prelude
 import Effect (Effect)
 import Effect.Console (log)
 
+import Data.Covered
+
+
 main :: Effect Unit
 main = do
-  log "🍝"
+  log "🍝 Foobar"
+  log $ show $ (carry "foo" :: Covered String String)

@@ -1,4 +1,5 @@
-module CoveredFsm where
+module CoveredFsm
+    (CoveredFsm, make, make') where
 
 import Prelude ((>>>), class Semigroup)
 
@@ -14,8 +15,8 @@ import Data.Covered (appendErrors) as Covered
 import Fsm (Fsm)
 import Fsm (make, joinWith) as Fsm
 
-newtype CoveredFsm error action model =
-    CoveredFsm (Fsm action (Covered error model))
+
+type CoveredFsm error action model = Fsm action (Covered error model)
 
 
 make
@@ -27,7 +28,6 @@ make
 make =
     Fsm.make
         >>> Fsm.joinWith ((<|>))
-        >>> CoveredFsm
 
 make'
     :: forall error action model
@@ -39,4 +39,3 @@ make'
 make' =
     Fsm.make
         >>> Fsm.joinWith Covered.appendErrors
-        >>> CoveredFsm
