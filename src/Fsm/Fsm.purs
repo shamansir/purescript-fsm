@@ -117,4 +117,3 @@ imapModel
 imapModel mapAToB mapBToA (Fsm updateF) =
     Fsm \action modelB ->
         bimap mapAToB identity $ updateF action $ mapBToA modelB
-

@@ -113,6 +113,11 @@ toEither (Recovered err _) = Left err
 toEither (Carried x) = Right x
 
 
+note :: forall e a. e -> Covered e a -> Covered e a
+note err (Carried x) = Recovered err x
+note _ recovered = recovered
+
+
 appendErrors :: forall e a b. Semigroup e => Covered e a -> Covered e b -> Covered e b
 appendErrors (Recovered errorsA _) (Recovered errorsB val) = Recovered (errorsA <> errorsB) val
 appendErrors (Recovered errors _) (Carried val) = Recovered errors val
