@@ -11,6 +11,7 @@ You can edit this file as you like.
   , "event"
   , "exceptions"
   , "foldable-traversable"
+  , "generics-rep"
   , "halogen-vdom"
   , "lists"
   , "maybe"

@@ -12,13 +12,17 @@ import Prelude
 import Effect (Effect)
 import Effect.Random (random) as Random
 
+import Control.Alt ((<|>))
+
 import Data.Maybe (Maybe(..))
 import Data.Either (Either(..))
 import Data.Tuple.Nested ((/\), type (/\))
 import Data.List (List(..), (:))
 import Data.List (union, difference) as List
+import Data.Generic.Rep (class Generic)
+import Data.Generic.Rep.Show (genericShow)
 import Data.Covered (Covered(..))
-import Data.Covered (note) as Covered
+import Data.Covered (note, fromEither, recover) as Covered
 
 import Spork.Html (Html)
 import Spork.Html (div, text) as H
@@ -287,11 +291,16 @@ update (ProduceError num) _ =
 
 
 update' :: Action -> Covered Error Model -> Covered Error Model /\ List (Effect Action)
-update' action covered = covered /\ Nil
+update' action covered =
+    let
+        recovered = Covered.recover covered
+        eitherModel' /\ effects' = update action recovered
+        covered' = Covered.fromEither recovered eitherModel'
+    in (covered <|> covered') /\ effects'
 
 
 view :: Model -> Html Action
-view _ =
+view model =
     H.div [] [ H.text "example" ]
 
 
@@ -312,3 +321,11 @@ app =
     Ui.make update' view'
 
 
+
+derive instance genericSkeletonPart :: Generic SkeletonPart _
+derive instance genericFish :: Generic Fish _
+derive instance genericBug :: Generic Bug _
+
+instance showSkeletonPart :: Show SkeletonPart where show = genericShow
+instance showFish :: Show Fish where show = genericShow
+instance showBug :: Show Bug where show = genericShow
