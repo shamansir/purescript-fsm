@@ -24,6 +24,7 @@ import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
 import Data.Covered (Covered(..))
 import Data.Covered (note, fromEither, recover) as Covered
+import Data.Newtype (class Newtype, unwrap)
 
 import Spork.Html (Html)
 import Spork.Html as H
@@ -41,7 +42,7 @@ data SkeletonPart
     | Neck
 
 
-data Fossil = Fossil SkeletonPart
+newtype Fossil = Fossil SkeletonPart
 
 data Bug
     = Butterfly
@@ -102,13 +103,14 @@ data PlayerAction
     | GetNoFossil
     | FindMuseumSpot
     | LocateMuseumSpot Location
-    | Deliver Species
-    | DeliverFossil Fossil
+    | Deliver
+    | GetInReturn Species
+    | DeliverFossils
 
 
 data HostAction
     = ConsiderSpecies Species
-    | ConsiderFossil Fossil
+    | ConsiderFossils (List Fossil)
     | SpeakDetails String
     | InformLackOfAmount Int
     | RequireTentLocation
@@ -151,10 +153,10 @@ init =
 
 
 partsChoice =
-    (Jaws /\ 0.3) : (Tail /\ 0.4) : (Neck /\ 0.5) : (Ribs /\ 0.6) : (Skull /\ 0.8)
+    (Jaws /\ 0.36) : (Tail /\ 0.26) : (Neck /\ 0.20) : (Ribs /\ 0.09) : (Skull /\ 0.05) : (Backbone /\ 0.04)
     : Nil
 bugsChoice =
-    (Butterfly /\ 0.3) : (Spider /\ 0.5) : (Ladybug /\ 0.6) : (Caterpillar /\ 0.8)
+    (Butterfly /\ 0.40) : (Spider /\ 0.30) : (Ladybug /\ 0.15) : (Caterpillar /\ 0.10) : (Tarantula /\ 0.05)
     : Nil
 
 
@@ -163,13 +165,14 @@ update :: Action -> Model -> Either Error Model /\ List (Effect Action)
 update (ByPlayer playerAction) model = playerUpdate playerAction where
 
     decide :: forall a. a -> a -> Number -> Number -> a
-    decide vA _ p n | n <= p     = vA
+    decide vA _ p n | n <= p    = vA
     decide _ vB p n | otherwise = vB
 
     decide' :: forall a. List ( a /\ Number ) -> a -> Number -> a
     decide' Nil fallback _ = fallback
-    decide' ((v /\ p) : vs) fallback n | n <= p    = v
-    decide' (       _ : vs) fallback n | otherwise = decide' vs fallback n
+    decide' ((v /\ p) : vs) fallback n
+        | n <= p    = v
+        | otherwise = decide' vs fallback $ n - p
 
     playerUpdate Dig =
         pure model
@@ -199,7 +202,7 @@ update (ByPlayer playerAction) model = playerUpdate playerAction where
             n1 <- Random.random
             n2 <- Random.random
             pure $ ByPlayer
-                 $ decide (GetFish $ decide Bass Peacock 0.4 n2) GetNoFish 0.4 n1
+                 $ decide (GetFish $ decide Bass Peacock 0.7 n2) GetNoFish 0.4 n1
             : Nil
 
     playerUpdate (GetFish fish) =
@@ -220,10 +223,19 @@ update (ByPlayer playerAction) model = playerUpdate playerAction where
             }
         /\ Nil
 
-    playerUpdate (Deliver species) =
-        pure model
-        /\  (pure $ ByHost $ ConsiderSpecies species)
+    playerUpdate Deliver =
+        pure model { player = noSpecies { fossils = model.player.fossils } }
+        /\  (pure $ ByHost $ ConsiderSpecies model.player { fossils = Nil } )
             : Nil
+
+    playerUpdate DeliverFossils =
+        pure model { player { fossils = Nil } }
+        /\  (pure $ ByHost $ ConsiderFossils model.player.fossils )
+            : Nil
+
+    playerUpdate (GetInReturn leftovers) =
+        pure model { player = addSpecies model.player leftovers }
+        /\ Nil
 
     playerUpdate FindMuseumSpot =
         pure model
@@ -248,30 +260,23 @@ update (ByPlayer playerAction) model = playerUpdate playerAction where
 
 update (ByHost hostAction) model = hostUpdate hostAction where
 
-    addUniqueSpecies :: Species -> Species -> Species
-    addUniqueSpecies to from =
-        { fish : List.union from.fish to.fish
-        , bugs : List.union from.bugs to.bugs
-        , skeletons : to.skeletons
-        , fossils : to.fossils
-        }
-
-    findDifferences :: Species -> Species -> Species
-    findDifferences speciesA speciesB =
-        { fish : List.difference speciesA.fish speciesB.fish
-        , bugs : List.difference speciesA.bugs speciesB.bugs
-        , skeletons : List.difference speciesA.skeletons speciesB.skeletons
-        , fossils : List.difference speciesA.fossils speciesB.fossils
-        }
-
     hostUpdate (ConsiderSpecies species) =
         pure model
             { museum
                 { exposition =
-                    species # addUniqueSpecies model.museum.exposition
+                    addSpecies model.museum.exposition newSpecies
                 }
             }
-        /\ Nil
+        /\ (pure $ ByPlayer $ GetInReturn leftovers) : Nil
+        where
+            newSpecies = findNewSpecies model.museum.exposition species
+            leftovers = findDifference species newSpecies
+
+    hostUpdate (ConsiderFossils fossils) =
+        pure model
+        /\ (pure $ ByPlayer $ GetInReturn
+                (noSpecies { skeletons = (\(Fossil sp) -> sp) <$> fossils })
+           ) : Nil
 
     hostUpdate _ = pure model /\ Nil
 
@@ -296,6 +301,8 @@ view model =
         , button "Dig" $ ByPlayer Dig
         , button "Catch" $ ByPlayer Catch
         , button "Go Fishing" $ ByPlayer GoFishing
+        , button "Deliver" $ ByPlayer Deliver
+        , button "Deliver Fossils" $ ByPlayer DeliverFossils
         , H.h5 [] [ H.text "Species" ]
         , showSpecies model.player
         , H.hr []
@@ -324,22 +331,23 @@ view model =
                        <> "flex-direction: row;"
                        <> "justify-content: space-between;"
                 ]
-                [ showList "fish" species.fish
-                , showList "bugs" species.bugs
-                , showList "skeletons" species.skeletons
-                , showList "fossils" species.fossils
+                [ showList "fish" $ loadAmounts species.fish
+                , showList "bugs" $ loadAmounts species.bugs
+                , showList "skeletons" $ loadAmounts species.skeletons
+                , showList "fossils" $ case List.head species.fossils of
+                    Just fossil -> pure $ fossil /\ List.length species.fossils
+                    Nothing -> Nil
                 ]
         showList
             :: forall a
-             . Ord a => Eq a => Show a
-            => String -> List a -> Html Action
-        showList label values =
+             . Show a
+            => String -> List (a /\ Int) -> Html Action
+        showList label items =
             H.ul []
                 $ H.li []
                     <$> pure <$> H.text
                     <$> (\(item /\ amount) -> show amount <> "x" <> show item)
-                    <$> (\vs -> NEList.head vs /\ NEList.length vs)
-                    <$> List.toUnfoldable (List.group $ List.sort values)
+                    <$> List.toUnfoldable items
 
 
 view' :: Covered Error Model -> Html Action
@@ -358,6 +366,38 @@ app :: App
 app =
     Ui.make update' view'
 
+
+loadAmounts :: forall a. Ord a => Eq a => List a -> List (a /\ Int)
+loadAmounts values =
+    (\vs -> NEList.head vs /\ NEList.length vs)
+        <$> List.toUnfoldable (List.group $ List.sort values)
+
+
+addSpecies :: Species -> Species -> Species
+addSpecies museum other =
+    { fish : museum.fish <> other.fish
+    , bugs : museum.bugs <> other.bugs
+    , skeletons : museum.skeletons <> other.skeletons
+    , fossils : museum.fossils <> other.fossils
+    }
+
+
+findNewSpecies :: Species -> Species -> Species
+findNewSpecies museum player =
+    { fish : List.difference (List.nub player.fish) museum.fish
+    , bugs : List.difference (List.nub player.bugs) museum.bugs
+    , skeletons : List.difference (List.nub player.skeletons) museum.skeletons
+    , fossils : List.difference (List.nub player.fossils) museum.fossils
+    }
+
+
+findDifference :: Species -> Species -> Species
+findDifference wereGiven beenUseful =
+    { fish : List.difference wereGiven.fish beenUseful.fish
+    , bugs : List.difference wereGiven.bugs beenUseful.bugs
+    , skeletons : List.difference wereGiven.skeletons beenUseful.skeletons
+    , fossils : List.difference wereGiven.fossils beenUseful.fossils
+    }
 
 
 addSkeleton species skeletonPart = species { skeletons = skeletonPart : species.skeletons }
@@ -385,7 +425,7 @@ derive instance genericFacade :: Generic MuseumFacade _
 instance showSkeletonPart :: Show SkeletonPart where show = genericShow
 instance showFish :: Show Fish where show = genericShow
 instance showBug :: Show Bug where show = genericShow
-instance showFossil :: Show Fossil where show (Fossil part) = "{<" <> show part <> ">}"
+instance showFossil :: Show Fossil where show _ = "{@}"
 instance showHost :: Show Host
     where show TomNook = "Tom Nook"
           show Blathers = "Blathers"
