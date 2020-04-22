@@ -112,10 +112,6 @@ data PlayerAction
 data HostAction
     = ConsiderSpecies Species
     | ConsiderFossils (List Fossil)
-    | SpeakDetails String
-    | InformLackOfAmount Int
-    | RequireTentLocation
-    | RequireMuseumLocation
 
 
 data Action
@@ -124,7 +120,11 @@ data Action
     | ProduceError Int
 
 
-data Error = Error Int
+data Error
+    = UnknownError Int
+    | NoLocatingAllowed
+    | NoSpeciesDeliveryAllowed
+    | NoFossilsDeliveryAllowed
 
 
 type App =
@@ -148,7 +148,8 @@ init =
         , facade : Nowhere
         , open : true
         , speech : Just
-            $ "Need " <> show upgradeToTentAt <> " more unique species to upgrade to tent."
+            $ "Go dig and catch! We need "
+                <> show upgradeToTentAt <> " unique species to upgrade to tent."
         }
     , player : noSpecies
     }
@@ -247,13 +248,19 @@ update (ByPlayer playerAction) model = playerUpdate playerAction where
             }
         /\ Nil
 
+    playerUpdate GetNoFish = pure model /\ Nil
+
+    playerUpdate GetNoBug = pure model /\ Nil
+
+    playerUpdate GetNoFossil= pure model /\ Nil
+
     playerUpdate Deliver | canDeliver model.museum =
         pure model { player = noSpecies { fossils = model.player.fossils } }
         /\  (pure $ ByHost $ ConsiderSpecies model.player { fossils = Nil } )
             : Nil
 
     playerUpdate Deliver | otherwise =
-        pure model /\ Nil
+        Left NoSpeciesDeliveryAllowed /\ Nil
 
     playerUpdate DeliverFossils | canDeliverFossils model.museum =
         pure model { player { fossils = Nil } }
@@ -261,7 +268,7 @@ update (ByPlayer playerAction) model = playerUpdate playerAction where
             : Nil
 
     playerUpdate DeliverFossils | otherwise =
-        pure model /\ Nil
+        Left NoFossilsDeliveryAllowed /\ Nil
 
     playerUpdate (GetInReturn leftovers) =
         pure model { player = addSpecies model.player leftovers }
@@ -273,7 +280,7 @@ update (ByPlayer playerAction) model = playerUpdate playerAction where
                 <$> ((/\) <$> Random.random <*> Random.random)
             ) : Nil
 
-    playerUpdate (LocateMuseumSpot location) =
+    playerUpdate (LocateMuseumSpot location) | not model.museum.open =
         pure model
             { museum
                 { host = Blathers
@@ -288,7 +295,8 @@ update (ByPlayer playerAction) model = playerUpdate playerAction where
             }
         /\ Nil
 
-    playerUpdate _ = pure model /\ Nil
+    playerUpdate (LocateMuseumSpot location) | otherwise =
+        Left NoLocatingAllowed /\ Nil
 
 update (ByHost hostAction) model = hostUpdate hostAction where
 
@@ -342,7 +350,8 @@ update (ByHost hostAction) model = hostUpdate hostAction where
                         _ -> "Everything's Fine.."
                 | otherwise = "Museum Closed."
 
-    hostUpdate (ConsiderSpecies _) | otherwise = pure model /\ Nil
+    hostUpdate (ConsiderSpecies _) | otherwise
+        = Left NoSpeciesDeliveryAllowed /\ Nil
 
     hostUpdate (ConsiderFossils fossils) | canConsiderFossils model.museum =
         pure model
@@ -350,12 +359,11 @@ update (ByHost hostAction) model = hostUpdate hostAction where
                 (noSpecies { skeletons = (\(Fossil sp) -> sp) <$> fossils })
            ) : Nil
 
-    hostUpdate (ConsiderFossils _) | otherwise = pure model /\ Nil
-
-    hostUpdate _ = pure model /\ Nil
+    hostUpdate (ConsiderFossils _) | otherwise
+        = Left NoFossilsDeliveryAllowed /\ Nil
 
 update (ProduceError num) _ =
-    Left (Error num) /\ Nil
+    Left (UnknownError num) /\ Nil
 
 
 update' :: Action -> Covered Error Model -> Covered Error Model /\ List (Effect Action)
@@ -377,7 +385,7 @@ view model =
         , button "Go Fishing" $ ByPlayer GoFishing
         , button' "Deliver" model.museum.open $ ByPlayer Deliver
         , button' "Deliver Fossils" model.museum.open $ ByPlayer DeliverFossils
-        , button "Find Museum Spot" $ ByPlayer FindMuseumSpot
+        , button' "Find Museum Spot" (not model.museum.open) $ ByPlayer FindMuseumSpot
         , H.h5 [] [ H.text "Species" ]
         , showSpecies model.player
         , H.hr []
@@ -433,11 +441,11 @@ view' :: Covered Error Model -> Html Action
 view' covered =
     case covered of
         Carried model -> view model
-        Recovered (Error n) model ->
+        Recovered error model ->
             H.div
                 [ ]
                 [ view model
-                , H.text $ "Error: " <> show n
+                , H.text $ "Latest errors: " <> show error
                 ]
 
 
@@ -509,6 +517,7 @@ derive instance genericSkeletonPart :: Generic SkeletonPart _
 derive instance genericFish :: Generic Fish _
 derive instance genericBug :: Generic Bug _
 derive instance genericFacade :: Generic MuseumFacade _
+derive instance genericError :: Generic Error _
 
 instance showSkeletonPart :: Show SkeletonPart where show = genericShow
 instance showFish :: Show Fish where show = genericShow
@@ -522,3 +531,4 @@ instance showLocation :: Show Location
         show (Location (x /\ y))
             = (show $ floor (x * 100.0)) <> "x" <> (show $ floor (y * 100.0))
 instance showFacade :: Show MuseumFacade where show = genericShow
+instance showError :: Show Error where show = genericShow
