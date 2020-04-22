@@ -18,14 +18,15 @@ import Data.Maybe (Maybe(..))
 import Data.Either (Either(..))
 import Data.Tuple.Nested ((/\), type (/\))
 import Data.List (List(..), (:))
-import Data.List (union, difference) as List
+import Data.List as List
+import Data.List.NonEmpty as NEList
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
 import Data.Covered (Covered(..))
 import Data.Covered (note, fromEither, recover) as Covered
 
 import Spork.Html (Html)
-import Spork.Html (div, text) as H
+import Spork.Html as H
 
 import Ui (Ui)
 import Ui (make) as Ui
@@ -63,25 +64,6 @@ type Species =
     }
 
 
-derive instance eqSkeletonPart :: Eq SkeletonPart
-derive instance eqFossil :: Eq Fossil
-derive instance eqBug :: Eq Bug
-derive instance eqFish :: Eq Fish
-
-
-addSkeleton species skeletonPart = species { skeletons = skeletonPart : species.skeletons }
-addFossil species fossil = species { fossils = fossil : species.fossils }
-addBug species bug = species { bugs = bug : species.bugs }
-addFish species fish = species { fish = fish : species.fish }
-
-partsChoice =
-    (Jaws /\ 0.3) : (Tail /\ 0.4) : (Neck /\ 0.5) : (Ribs /\ 0.6) : (Skull /\ 0.8)
-    : Nil
-bugsChoice =
-    (Butterfly /\ 0.3) : (Spider /\ 0.5) : (Ladybug /\ 0.6) : (Caterpillar /\ 0.8)
-    : Nil
-
-
 type Location = Number /\ Number
 
 
@@ -110,7 +92,7 @@ type Model =
 
 data PlayerAction
     = Dig
-    | Hook
+    | GoFishing
     | Catch
     | GetFish Fish
     | GetBug Bug
@@ -168,17 +150,25 @@ init =
     }
 
 
+partsChoice =
+    (Jaws /\ 0.3) : (Tail /\ 0.4) : (Neck /\ 0.5) : (Ribs /\ 0.6) : (Skull /\ 0.8)
+    : Nil
+bugsChoice =
+    (Butterfly /\ 0.3) : (Spider /\ 0.5) : (Ladybug /\ 0.6) : (Caterpillar /\ 0.8)
+    : Nil
+
+
 update :: Action -> Model -> Either Error Model /\ List (Effect Action)
 
 update (ByPlayer playerAction) model = playerUpdate playerAction where
 
     decide :: forall a. a -> a -> Number -> Number -> a
-    decide vA _ p n | n < p     = vA
+    decide vA _ p n | n <= p     = vA
     decide _ vB p n | otherwise = vB
 
     decide' :: forall a. List ( a /\ Number ) -> a -> Number -> a
     decide' Nil fallback _ = fallback
-    decide' ((v /\ p) : vs) fallback n | p <= n    = v
+    decide' ((v /\ p) : vs) fallback n | n <= p    = v
     decide' (       _ : vs) fallback n | otherwise = decide' vs fallback n
 
     playerUpdate Dig =
@@ -192,7 +182,7 @@ update (ByPlayer playerAction) model = playerUpdate playerAction where
                     GetNoFossil 0.4 n1
             : Nil
 
-    playerUpdate Hook =
+    playerUpdate Catch =
         pure model
         /\ do
             n1 <- Random.random
@@ -203,7 +193,7 @@ update (ByPlayer playerAction) model = playerUpdate playerAction where
                     GetNoBug 0.4 n1
             : Nil
 
-    playerUpdate Catch =
+    playerUpdate GoFishing =
         pure model
         /\ do
             n1 <- Random.random
@@ -240,7 +230,6 @@ update (ByPlayer playerAction) model = playerUpdate playerAction where
         /\  (ByPlayer <<< LocateMuseumSpot
                 <$> ((/\) <$> Random.random <*> Random.random)
             ) : Nil
-
 
     playerUpdate (LocateMuseumSpot location) =
         pure model
@@ -301,7 +290,56 @@ update' action covered =
 
 view :: Model -> Html Action
 view model =
-    H.div [] [ H.text "example" ]
+    H.div
+        []
+        [ H.h3 [] [ H.text "Player" ]
+        , button "Dig" $ ByPlayer Dig
+        , button "Catch" $ ByPlayer Catch
+        , button "Go Fishing" $ ByPlayer GoFishing
+        , H.h5 [] [ H.text "Species" ]
+        , showSpecies model.player
+        , H.hr []
+        , H.h3 [] [ H.text "Museum" ]
+        , H.h5 [] [ H.text $ "Host: " <> show model.museum.host ]
+        , H.text $ "Says: " <> case model.museum.speech of
+            Just speech -> speech
+            Nothing -> "nothing."
+        , H.h5 [] [ H.text $ "Open: " <> show model.museum.open ]
+        , H.h5 [] [ H.text $ "Facade: " <> show model.museum.facade ]
+        , H.h5 [] [ H.text "Exposition" ]
+        , showSpecies model.museum.exposition
+        ]
+
+    where
+        button label action =
+            H.button
+                [ H.onClick $ const $ Just $ action ]
+                [ H.text label ]
+        showSpecies :: Species -> Html Action
+        showSpecies species =
+            H.div
+                [ H.style
+                        $ "display: flex;"
+                       <> "width: 40%;"
+                       <> "flex-direction: row;"
+                       <> "justify-content: space-between;"
+                ]
+                [ showList "fish" species.fish
+                , showList "bugs" species.bugs
+                , showList "skeletons" species.skeletons
+                , showList "fossils" species.fossils
+                ]
+        showList
+            :: forall a
+             . Ord a => Eq a => Show a
+            => String -> List a -> Html Action
+        showList label values =
+            H.ul []
+                $ H.li []
+                    <$> pure <$> H.text
+                    <$> (\(item /\ amount) -> show amount <> "x" <> show item)
+                    <$> (\vs -> NEList.head vs /\ NEList.length vs)
+                    <$> List.toUnfoldable (List.group $ List.sort values)
 
 
 view' :: Covered Error Model -> Html Action
@@ -322,10 +360,33 @@ app =
 
 
 
+addSkeleton species skeletonPart = species { skeletons = skeletonPart : species.skeletons }
+addFossil species fossil = species { fossils = fossil : species.fossils }
+addBug species bug = species { bugs = bug : species.bugs }
+addFish species fish = species { fish = fish : species.fish }
+
+
+
+derive instance eqSkeletonPart :: Eq SkeletonPart
+derive instance eqFossil :: Eq Fossil
+derive instance eqBug :: Eq Bug
+derive instance eqFish :: Eq Fish
+derive instance ordSkeletonPart :: Ord SkeletonPart
+derive instance ordFossil :: Ord Fossil
+derive instance ordBug :: Ord Bug
+derive instance ordFish :: Ord Fish
+
+
 derive instance genericSkeletonPart :: Generic SkeletonPart _
 derive instance genericFish :: Generic Fish _
 derive instance genericBug :: Generic Bug _
+derive instance genericFacade :: Generic MuseumFacade _
 
 instance showSkeletonPart :: Show SkeletonPart where show = genericShow
 instance showFish :: Show Fish where show = genericShow
 instance showBug :: Show Bug where show = genericShow
+instance showFossil :: Show Fossil where show (Fossil part) = "{<" <> show part <> ">}"
+instance showHost :: Show Host
+    where show TomNook = "Tom Nook"
+          show Blathers = "Blathers"
+instance showFacade :: Show MuseumFacade where show = genericShow
