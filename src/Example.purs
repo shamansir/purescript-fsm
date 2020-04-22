@@ -15,6 +15,7 @@ import Effect.Random (random) as Random
 import Control.Alt ((<|>))
 
 import Data.Int (floor)
+import Data.String (joinWith) as String
 import Data.Maybe (Maybe(..), isJust)
 import Data.Either (Either(..))
 import Data.Tuple.Nested ((/\), type (/\))
@@ -24,14 +25,14 @@ import Data.List.NonEmpty as NEList
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
 import Data.Covered (Covered(..))
-import Data.Covered (note, fromEither, recover) as Covered
+import Data.Covered (note, fromEither, recover, cover) as Covered
 import Data.Newtype (class Newtype, unwrap)
 
 import Spork.Html (Html)
 import Spork.Html as H
 
 import Ui (Ui)
-import Ui (make) as Ui
+import Ui (make, make') as Ui
 
 
 data SkeletonPart
@@ -117,14 +118,15 @@ data HostAction
 data Action
     = ByPlayer PlayerAction
     | ByHost HostAction
-    | ProduceError Int
+    | ProduceError
 
 
 data Error
-    = UnknownError Int
+    = ProducedError
     | NoLocatingAllowed
     | NoSpeciesDeliveryAllowed
     | NoFossilsDeliveryAllowed
+    | SeveralErrors (List Error)
 
 
 type App =
@@ -185,7 +187,7 @@ bugsChoice =
     : Nil
 
 
-update :: Action -> Model -> Either Error Model /\ List (Effect Action)
+update :: Action -> Model -> Covered Error Model /\ List (Effect Action)
 
 update (ByPlayer playerAction) model = playerUpdate playerAction where
 
@@ -252,7 +254,7 @@ update (ByPlayer playerAction) model = playerUpdate playerAction where
 
     playerUpdate GetNoBug = pure model /\ Nil
 
-    playerUpdate GetNoFossil= pure model /\ Nil
+    playerUpdate GetNoFossil = pure model /\ Nil
 
     playerUpdate Deliver | canDeliver model.museum =
         pure model { player = noSpecies { fossils = model.player.fossils } }
@@ -260,7 +262,7 @@ update (ByPlayer playerAction) model = playerUpdate playerAction where
             : Nil
 
     playerUpdate Deliver | otherwise =
-        Left NoSpeciesDeliveryAllowed /\ Nil
+        (NoSpeciesDeliveryAllowed # Covered.cover model) /\ Nil
 
     playerUpdate DeliverFossils | canDeliverFossils model.museum =
         pure model { player { fossils = Nil } }
@@ -268,7 +270,7 @@ update (ByPlayer playerAction) model = playerUpdate playerAction where
             : Nil
 
     playerUpdate DeliverFossils | otherwise =
-        Left NoFossilsDeliveryAllowed /\ Nil
+        (NoFossilsDeliveryAllowed # Covered.cover model) /\ Nil
 
     playerUpdate (GetInReturn leftovers) =
         pure model { player = addSpecies model.player leftovers }
@@ -296,7 +298,7 @@ update (ByPlayer playerAction) model = playerUpdate playerAction where
         /\ Nil
 
     playerUpdate (LocateMuseumSpot location) | otherwise =
-        Left NoLocatingAllowed /\ Nil
+        (NoLocatingAllowed # Covered.cover model) /\ Nil
 
 update (ByHost hostAction) model = hostUpdate hostAction where
 
@@ -351,7 +353,7 @@ update (ByHost hostAction) model = hostUpdate hostAction where
                 | otherwise = "Museum Closed."
 
     hostUpdate (ConsiderSpecies _) | otherwise
-        = Left NoSpeciesDeliveryAllowed /\ Nil
+        = (NoSpeciesDeliveryAllowed # Covered.cover model) /\ Nil
 
     hostUpdate (ConsiderFossils fossils) | canConsiderFossils model.museum =
         pure model
@@ -360,19 +362,22 @@ update (ByHost hostAction) model = hostUpdate hostAction where
            ) : Nil
 
     hostUpdate (ConsiderFossils _) | otherwise
-        = Left NoFossilsDeliveryAllowed /\ Nil
+        = (NoFossilsDeliveryAllowed # Covered.cover model) /\ Nil
 
-update (ProduceError num) _ =
-    Left (UnknownError num) /\ Nil
+update ProduceError model =
+    (ProducedError # Covered.cover model) /\ Nil
 
 
 update' :: Action -> Covered Error Model -> Covered Error Model /\ List (Effect Action)
 update' action covered =
+    update action $ Covered.recover covered
+    {-
     let
         recovered = Covered.recover covered
         eitherModel' /\ effects' = update action recovered
         covered' = Covered.fromEither recovered eitherModel'
     in (covered <|> covered') /\ effects'
+    -}
 
 
 view :: Model -> Html Action
@@ -386,6 +391,7 @@ view model =
         , button' "Deliver" model.museum.open $ ByPlayer Deliver
         , button' "Deliver Fossils" model.museum.open $ ByPlayer DeliverFossils
         , button' "Find Museum Spot" (not model.museum.open) $ ByPlayer FindMuseumSpot
+        , button "Produce Error" ProduceError
         , H.h5 [] [ H.text "Species" ]
         , showSpecies model.player
         , H.hr []
@@ -451,7 +457,7 @@ view' covered =
 
 app :: App
 app =
-    Ui.make update' view'
+    Ui.make' update' view'
 
 
 loadAmounts :: forall a. Ord a => Eq a => List a -> List (a /\ Int)
@@ -500,6 +506,20 @@ addBug species bug = species { bugs = bug : species.bugs }
 addFish species fish = species { fish = fish : species.fish }
 
 
+instance semigroupError :: Semigroup Error where
+    append (SeveralErrors listA) (SeveralErrors listB) = SeveralErrors $ listA <> listB
+    append singleError (SeveralErrors list) = SeveralErrors $ singleError : list
+    append (SeveralErrors list) singleError = SeveralErrors $ list <> pure singleError
+    append singleErrorA singleErrorB = SeveralErrors $ pure singleErrorA <> pure singleErrorB
+
+
+instance showError :: Show Error where
+    show ProducedError = "Produced Error."
+    show (SeveralErrors list) = String.joinWith " " $ List.toUnfoldable $ show <$> list
+    show NoLocatingAllowed = "Locating is not allowed now."
+    show NoSpeciesDeliveryAllowed = "Delivering species is not allowed now."
+    show NoFossilsDeliveryAllowed = "Delivering fossils is not allowed now."
+
 
 derive instance eqSkeletonPart :: Eq SkeletonPart
 derive instance eqFossil :: Eq Fossil
@@ -517,7 +537,7 @@ derive instance genericSkeletonPart :: Generic SkeletonPart _
 derive instance genericFish :: Generic Fish _
 derive instance genericBug :: Generic Bug _
 derive instance genericFacade :: Generic MuseumFacade _
-derive instance genericError :: Generic Error _
+
 
 instance showSkeletonPart :: Show SkeletonPart where show = genericShow
 instance showFish :: Show Fish where show = genericShow
@@ -531,4 +551,3 @@ instance showLocation :: Show Location
         show (Location (x /\ y))
             = (show $ floor (x * 100.0)) <> "x" <> (show $ floor (y * 100.0))
 instance showFacade :: Show MuseumFacade where show = genericShow
-instance showError :: Show Error where show = genericShow
