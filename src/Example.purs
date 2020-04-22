@@ -14,7 +14,8 @@ import Effect.Random (random) as Random
 
 import Control.Alt ((<|>))
 
-import Data.Maybe (Maybe(..))
+import Data.Int (floor)
+import Data.Maybe (Maybe(..), isJust)
 import Data.Either (Either(..))
 import Data.Tuple.Nested ((/\), type (/\))
 import Data.List (List(..), (:))
@@ -65,7 +66,7 @@ type Species =
     }
 
 
-type Location = Number /\ Number
+newtype Location = Location (Number /\ Number)
 
 
 data MuseumFacade
@@ -146,15 +147,38 @@ init =
         , exposition : noSpecies
         , facade : Nowhere
         , open : true
-        , speech : Nothing
+        , speech : Just
+            $ "Need " <> show upgradeToTentAt <> " more unique species to upgrade to tent."
         }
     , player : noSpecies
     }
 
 
+upgradeToTentAt :: Int
+upgradeToTentAt = 5
+
+
+upgradeToBuildingAt :: Int
+upgradeToBuildingAt = 10
+
+
+canDeliver :: forall a. { open :: Boolean | a } -> Boolean
+canDeliver museum = museum.open
+canDeliverFossils :: forall a. { open :: Boolean, facade :: MuseumFacade | a } -> Boolean
+canDeliverFossils museum = museum.open && museum.facade /= Nowhere
+canConsider :: forall a. { open :: Boolean | a } -> Boolean
+canConsider = canDeliver
+canConsiderFossils :: forall a. { open :: Boolean, facade :: MuseumFacade | a } -> Boolean
+canConsiderFossils = canDeliverFossils
+
+
+partsChoice :: List (SkeletonPart /\ Number)
 partsChoice =
     (Jaws /\ 0.36) : (Tail /\ 0.26) : (Neck /\ 0.20) : (Ribs /\ 0.09) : (Skull /\ 0.05) : (Backbone /\ 0.04)
     : Nil
+
+
+bugsChoice :: List (Bug /\ Number)
 bugsChoice =
     (Butterfly /\ 0.40) : (Spider /\ 0.30) : (Ladybug /\ 0.15) : (Caterpillar /\ 0.10) : (Tarantula /\ 0.05)
     : Nil
@@ -223,15 +247,21 @@ update (ByPlayer playerAction) model = playerUpdate playerAction where
             }
         /\ Nil
 
-    playerUpdate Deliver =
+    playerUpdate Deliver | canDeliver model.museum =
         pure model { player = noSpecies { fossils = model.player.fossils } }
         /\  (pure $ ByHost $ ConsiderSpecies model.player { fossils = Nil } )
             : Nil
 
-    playerUpdate DeliverFossils =
+    playerUpdate Deliver | otherwise =
+        pure model /\ Nil
+
+    playerUpdate DeliverFossils | canDeliverFossils model.museum =
         pure model { player { fossils = Nil } }
         /\  (pure $ ByHost $ ConsiderFossils model.player.fossils )
             : Nil
+
+    playerUpdate DeliverFossils | otherwise =
+        pure model /\ Nil
 
     playerUpdate (GetInReturn leftovers) =
         pure model { player = addSpecies model.player leftovers }
@@ -239,19 +269,21 @@ update (ByPlayer playerAction) model = playerUpdate playerAction where
 
     playerUpdate FindMuseumSpot =
         pure model
-        /\  (ByPlayer <<< LocateMuseumSpot
+        /\  (ByPlayer <<< LocateMuseumSpot <<< Location
                 <$> ((/\) <$> Random.random <*> Random.random)
             ) : Nil
 
     playerUpdate (LocateMuseumSpot location) =
         pure model
             { museum
-                { facade =
+                { host = Blathers
+                , facade =
                     case model.museum.facade of
                         Nowhere -> Tent location
                         Tent _ -> Building location
                         Building _ -> Building location
                 , open = true
+                , speech = Just "WHOOO-HOO!"
                 }
             }
         /\ Nil
@@ -260,23 +292,65 @@ update (ByPlayer playerAction) model = playerUpdate playerAction where
 
 update (ByHost hostAction) model = hostUpdate hostAction where
 
-    hostUpdate (ConsiderSpecies species) =
+    hostUpdate (ConsiderSpecies species) | canConsider model.museum =
         pure model
             { museum
-                { exposition =
-                    addSpecies model.museum.exposition newSpecies
+                { exposition = newExposition
+                , open = isJust $ requiredMore model.museum.facade
+                , speech = Just $ speech $ requiredMore model.museum.facade
                 }
             }
         /\ (pure $ ByPlayer $ GetInReturn leftovers) : Nil
         where
-            newSpecies = findNewSpecies model.museum.exposition species
-            leftovers = findDifference species newSpecies
+            givenUniqueSpecies = findNewSpecies model.museum.exposition species
+            leftovers = findDifference species givenUniqueSpecies
+            newExposition = addSpecies model.museum.exposition givenUniqueSpecies
+            deliveredAmount = countSpecies givenUniqueSpecies
+            newAmount = countSpecies newExposition
 
-    hostUpdate (ConsiderFossils fossils) =
+            requiredMore Nowhere =
+                if upgradeToTentAt - newAmount > 0
+                    then Just $ upgradeToTentAt - newAmount
+                    else Nothing
+            requiredMore (Tent _) =
+                if upgradeToBuildingAt - newAmount > 0
+                    then Just $ upgradeToBuildingAt - newAmount
+                    else Nothing
+            requiredMore _ = Nothing
+
+            speech (Just 0) = "Please locate a where to build"
+            speech (Just amountNeeded)
+                | deliveredAmount <= 1 = progressSpeech amountNeeded
+                | deliveredAmount == 1 =
+                    "Do you want a story? " <> progressSpeech amountNeeded
+                | deliveredAmount > 1 =
+                    "Thank you! " <> progressSpeech amountNeeded
+                | otherwise = "Weird..."
+            speech Nothing | otherwise =
+                case model.museum.facade of
+                    Building _ -> "Enjoy the day!"
+                    Tent _ -> "Please find a location for the building"
+                    Nowhere -> "Please find a location for the tent"
+
+            progressSpeech amountNeeded
+                | amountNeeded > 0 =
+                    case model.museum.facade of
+                        Nowhere -> "We need " <> show amountNeeded
+                                    <> " more unique species to build a tent."
+                        Tent _ -> "We need " <> show amountNeeded
+                                    <> " more unique species to aquire a building."
+                        _ -> "Everything's Fine.."
+                | otherwise = "Museum Closed."
+
+    hostUpdate (ConsiderSpecies _) | otherwise = pure model /\ Nil
+
+    hostUpdate (ConsiderFossils fossils) | canConsiderFossils model.museum =
         pure model
         /\ (pure $ ByPlayer $ GetInReturn
                 (noSpecies { skeletons = (\(Fossil sp) -> sp) <$> fossils })
            ) : Nil
+
+    hostUpdate (ConsiderFossils _) | otherwise = pure model /\ Nil
 
     hostUpdate _ = pure model /\ Nil
 
@@ -301,8 +375,9 @@ view model =
         , button "Dig" $ ByPlayer Dig
         , button "Catch" $ ByPlayer Catch
         , button "Go Fishing" $ ByPlayer GoFishing
-        , button "Deliver" $ ByPlayer Deliver
-        , button "Deliver Fossils" $ ByPlayer DeliverFossils
+        , button' "Deliver" model.museum.open $ ByPlayer Deliver
+        , button' "Deliver Fossils" model.museum.open $ ByPlayer DeliverFossils
+        , button "Find Museum Spot" $ ByPlayer FindMuseumSpot
         , H.h5 [] [ H.text "Species" ]
         , showSpecies model.player
         , H.hr []
@@ -319,8 +394,12 @@ view model =
 
     where
         button label action =
+            button' label true action
+        button' label isEnabled action =
             H.button
-                [ H.onClick $ const $ Just $ action ]
+                [ H.onClick $ const $ Just $ action
+                , H.enabled isEnabled
+                ]
                 [ H.text label ]
         showSpecies :: Species -> Html Action
         showSpecies species =
@@ -373,6 +452,13 @@ loadAmounts values =
         <$> List.toUnfoldable (List.group $ List.sort values)
 
 
+countSpecies :: Species -> Int
+countSpecies species =
+    List.length species.fish
+    + List.length species.bugs
+    + List.length species.skeletons
+
+
 addSpecies :: Species -> Species -> Species
 addSpecies museum other =
     { fish : museum.fish <> other.fish
@@ -411,6 +497,8 @@ derive instance eqSkeletonPart :: Eq SkeletonPart
 derive instance eqFossil :: Eq Fossil
 derive instance eqBug :: Eq Bug
 derive instance eqFish :: Eq Fish
+derive instance eqFacade :: Eq MuseumFacade
+derive instance eqLocation :: Eq Location
 derive instance ordSkeletonPart :: Ord SkeletonPart
 derive instance ordFossil :: Ord Fossil
 derive instance ordBug :: Ord Bug
@@ -429,4 +517,8 @@ instance showFossil :: Show Fossil where show _ = "{@}"
 instance showHost :: Show Host
     where show TomNook = "Tom Nook"
           show Blathers = "Blathers"
+instance showLocation :: Show Location
+    where
+        show (Location (x /\ y))
+            = (show $ floor (x * 100.0)) <> "x" <> (show $ floor (y * 100.0))
 instance showFacade :: Show MuseumFacade where show = genericShow
