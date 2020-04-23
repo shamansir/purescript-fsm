@@ -5,5 +5,13 @@ Finite State Machine in PureScript (The example)
 ```
 npm install -g purescript spago
 npm install
-spago run
+spago install
+npm run build
+npm run dev
+```
+
+To run tests:
+
+```
+npm run test
 ```

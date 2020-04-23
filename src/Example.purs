@@ -12,12 +12,9 @@ import Prelude
 import Effect (Effect)
 import Effect.Random (random) as Random
 
-import Control.Alt ((<|>))
-
 import Data.Int (floor)
 import Data.String (joinWith) as String
 import Data.Maybe (Maybe(..), isJust)
-import Data.Either (Either(..))
 import Data.Tuple.Nested ((/\), type (/\))
 import Data.List (List(..), (:))
 import Data.List as List
@@ -25,8 +22,7 @@ import Data.List.NonEmpty as NEList
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
 import Data.Covered (Covered(..))
-import Data.Covered (note, fromEither, recover, cover) as Covered
-import Data.Newtype (class Newtype, unwrap)
+import Data.Covered (recover, cover) as Covered
 
 import Spork.Html (Html)
 import Spork.Html as H
@@ -370,13 +366,6 @@ update ProduceError model =
 update' :: Action -> Covered Error Model -> Covered Error Model /\ List (Effect Action)
 update' action covered =
     update action $ Covered.recover covered
-    {-
-    let
-        recovered = Covered.recover covered
-        eitherModel' /\ effects' = update action recovered
-        covered' = Covered.fromEither recovered eitherModel'
-    in (covered <|> covered') /\ effects'
-    -}
 
 
 view :: Model -> Html Action
@@ -411,7 +400,7 @@ view model =
         button' label isEnabled action =
             H.button
                 [ H.onClick $ const $ Just $ action
-                , H.enabled isEnabled
+                --, H.enabled isEnabled
                 ]
                 [ H.text label ]
         showSpecies :: Species -> Html Action

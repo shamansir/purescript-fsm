@@ -19,6 +19,7 @@ You can edit this file as you like.
   , "psci-support"
   , "random"
   , "refs"
+  , "spec"
   , "spork"
   , "tuples"
   , "web-dom"

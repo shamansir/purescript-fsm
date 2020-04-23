@@ -14,7 +14,9 @@
   "scripts": {
     "dev": "spago build --watch & parcel index.html",
     "test": "spago test",
-    "build": "spago build && parcel build index.html"
+    "build": "spago build && parcel build index.html",
+    "start": "spago run & parcel index.html",
+    "postinstall": "spago install"
   },
   "repository": {
     "type": "git",
