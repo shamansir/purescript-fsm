@@ -43,7 +43,6 @@ data SkeletonPart
     | Ribs
     | Neck
 
-
 newtype Fossil = Fossil SkeletonPart
 
 data Bug
@@ -116,8 +115,8 @@ data HostAction
 
 
 data Action
-    = ByPlayer PlayerAction
-    | ByHost HostAction
+    = Player PlayerAction
+    | Host HostAction
     | ProduceError
 
 
@@ -189,7 +188,7 @@ bugsChoice =
 
 update :: Action -> Model -> Covered Error Model /\ List (Effect Action)
 
-update (ByPlayer playerAction) model = playerUpdate playerAction where
+update (Player playerAction) model = playerUpdate playerAction where
 
     decide :: forall a. a -> a -> Number -> Number -> a
     decide vA _ p n | n <= p    = vA
@@ -206,7 +205,7 @@ update (ByPlayer playerAction) model = playerUpdate playerAction where
         /\ do
             n1 <- Random.random
             n2 <- Random.random
-            pure $ ByPlayer
+            pure $ Player
                  $ decide
                     (GetFossil $ Fossil $ decide' partsChoice Backbone n2)
                     GetNoFossil 0.4 n1
@@ -217,7 +216,7 @@ update (ByPlayer playerAction) model = playerUpdate playerAction where
         /\ do
             n1 <- Random.random
             n2 <- Random.random
-            pure $ ByPlayer
+            pure $ Player
                  $ decide
                     (GetBug $ decide' bugsChoice Tarantula n2)
                     GetNoBug 0.4 n1
@@ -228,7 +227,7 @@ update (ByPlayer playerAction) model = playerUpdate playerAction where
         /\ do
             n1 <- Random.random
             n2 <- Random.random
-            pure $ ByPlayer
+            pure $ Player
                  $ decide (GetFish $ decide Bass Peacock 0.7 n2) GetNoFish 0.4 n1
             : Nil
 
@@ -258,7 +257,7 @@ update (ByPlayer playerAction) model = playerUpdate playerAction where
 
     playerUpdate Deliver | canDeliver model.museum =
         pure model { player = noSpecies { fossils = model.player.fossils } }
-        /\  (pure $ ByHost $ ConsiderSpecies model.player { fossils = Nil } )
+        /\  (pure $ Host $ ConsiderSpecies model.player { fossils = Nil } )
             : Nil
 
     playerUpdate Deliver | otherwise =
@@ -266,7 +265,7 @@ update (ByPlayer playerAction) model = playerUpdate playerAction where
 
     playerUpdate DeliverFossils | canDeliverFossils model.museum =
         pure model { player { fossils = Nil } }
-        /\  (pure $ ByHost $ ConsiderFossils model.player.fossils )
+        /\  (pure $ Host $ ConsiderFossils model.player.fossils )
             : Nil
 
     playerUpdate DeliverFossils | otherwise =
@@ -278,7 +277,7 @@ update (ByPlayer playerAction) model = playerUpdate playerAction where
 
     playerUpdate FindMuseumSpot =
         pure model
-        /\  (ByPlayer <<< LocateMuseumSpot <<< Location
+        /\  (Player <<< LocateMuseumSpot <<< Location
                 <$> ((/\) <$> Random.random <*> Random.random)
             ) : Nil
 
@@ -300,7 +299,7 @@ update (ByPlayer playerAction) model = playerUpdate playerAction where
     playerUpdate (LocateMuseumSpot location) | otherwise =
         (NoLocatingAllowed # Covered.cover model) /\ Nil
 
-update (ByHost hostAction) model = hostUpdate hostAction where
+update (Host hostAction) model = hostUpdate hostAction where
 
     hostUpdate (ConsiderSpecies species) | canConsider model.museum =
         pure model
@@ -310,7 +309,7 @@ update (ByHost hostAction) model = hostUpdate hostAction where
                 , speech = Just $ speech $ requiredMore model.museum.facade
                 }
             }
-        /\ (pure $ ByPlayer $ GetInReturn leftovers) : Nil
+        /\ (pure $ Player $ GetInReturn leftovers) : Nil
         where
             givenUniqueSpecies = findNewSpecies model.museum.exposition species
             leftovers = findDifference species givenUniqueSpecies
@@ -357,7 +356,7 @@ update (ByHost hostAction) model = hostUpdate hostAction where
 
     hostUpdate (ConsiderFossils fossils) | canConsiderFossils model.museum =
         pure model
-        /\ (pure $ ByPlayer $ GetInReturn
+        /\ (pure $ Player $ GetInReturn
                 (noSpecies { skeletons = (\(Fossil sp) -> sp) <$> fossils })
            ) : Nil
 
@@ -385,12 +384,12 @@ view model =
     H.div
         []
         [ H.h3 [] [ H.text "Player" ]
-        , button "Dig" $ ByPlayer Dig
-        , button "Catch" $ ByPlayer Catch
-        , button "Go Fishing" $ ByPlayer GoFishing
-        , button' "Deliver" model.museum.open $ ByPlayer Deliver
-        , button' "Deliver Fossils" model.museum.open $ ByPlayer DeliverFossils
-        , button' "Find Museum Spot" (not model.museum.open) $ ByPlayer FindMuseumSpot
+        , button "Dig" $ Player Dig
+        , button "Catch" $ Player Catch
+        , button "Go Fishing" $ Player GoFishing
+        , button' "Deliver" model.museum.open $ Player Deliver
+        , button' "Deliver Fossils" model.museum.open $ Player DeliverFossils
+        , button' "Find Museum Spot" (not model.museum.open) $ Player FindMuseumSpot
         , button "Produce Error" ProduceError
         , H.h5 [] [ H.text "Species" ]
         , showSpecies model.player

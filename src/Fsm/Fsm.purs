@@ -68,7 +68,6 @@ run (Fsm updateF) subModels init = do
         }
 
 
-
 fold
     :: forall action model f
      . Foldable f
